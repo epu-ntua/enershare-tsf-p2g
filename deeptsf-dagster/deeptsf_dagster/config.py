@@ -18,14 +18,15 @@ type_config = define_type_parameters(os.environ.get('TYPE'))
 class DeepTSFConfig(ConfigurableResource):
     run_id: str = type_config['run_id']
     timesteps_ahead: int = type_config['timesteps_ahead']
-    csv_file_path: str = f"{root_dir}/datasets/{os.environ.get('CSV_FILE_PATH')}"
+    input_data_path: str = 'crete_fc_uc.crete_load_long' # f"{root_dir}/datasets/{os.environ.get('CSV_FILE_PATH')}"
+    output_data_path: str = 'crete_fc_uc.crete_load_projection'
     csv_future_covs: str = os.environ.get('CSV_FUTURE_COVS')
     
     def to_dict(self):
         return {
             "run_id": self.run_id,
             # "timesteps_ahead": self.timesteps_ahead,
-            "csv_file_path": self.csv_file_path,
+            "csv_file_path": self.input_data_path,
             "csv_future_covs": self.csv_future_covs
         }
         

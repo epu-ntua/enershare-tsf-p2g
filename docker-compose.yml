@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  deeptsf_dagster:
+    container_name: deeptsf_dagster
+    image: deeptsf_dagster
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /dagster-dev/deeptsf-dagster/
+    command: ["dagster", "dev", "-h", "0.0.0.0", "-p", "9004"]
+    expose:
+      - "9004"
+    ports:
+      - "9004:9004"
+    volumes:
+      - ~/dagster-dev/deeptsf-dagster/storage:/dagster-dev/storage
+      - ~/dagster-dev/deeptsf-dagster/history:/dagster-dev/history

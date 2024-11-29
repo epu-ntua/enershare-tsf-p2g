@@ -7,11 +7,22 @@ from dagster import multi_asset, AssetIn, AssetOut, MetadataValue, Output, graph
 import base64
 from io import BytesIO
 import json
+import os
+from urllib.parse import urlparse
+from .db_assets import get_table_as_df, store_to_db
 
 # Define API configurations
 BASE_URL = "https://deeptsf-backend.toolbox.epu.ntua.gr"
 ENDPOINT = "/serving/get_result"
 CSV_FILE_PATH = "./wind.csv"
+
+
+def is_postgres_url(url):
+    parsed_url = urlparse(url)
+    return parsed_url.scheme.lower() == 'postgresql'
+
+def is_filepath(s):
+    return os.path.isabs(s) or os.path.isfile(s) or os.path.isdir(s)
 
 ### AUTHENTICATION ###
 
@@ -47,12 +58,21 @@ def get_keycloak_token():
     group_name='deepTSF_pipeline',
     required_resource_keys={"config"},
     outs={"input_series": AssetOut(dagster_type=dict)})
-def prepare_series_data(context):
+async def prepare_series_data(context):
     """Prepare time series data for the last 'hours' hours (default is 7 days)."""
 
     config = context.resources.config
 
-    df = pd.read_csv(config.csv_file_path)
+    df = pd.DataFrame()
+
+    if(is_filepath(config.input_data_path)):
+        df = pd.read_csv(config.input_data_path) #,index_col=0
+    # elif(is_postgres_url(config.input_data_path)):
+    else:
+        schema, table_name = config.input_data_path.split('.')
+        df = await get_table_as_df(schema, table_name)
+    
+    # df = pd.read_csv(config.input_data_path)
     df.set_index('Datetime', inplace=True)
     df.sort_index(inplace=True)
     
@@ -61,8 +81,8 @@ def prepare_series_data(context):
     
     # Format data as required by the API
     input_series = {"series": {"Value": recent_data['Value'].to_dict()}}
-    
-    return Output(input_series, metadata={'input_series': MetadataValue.md(str(pd.DataFrame(input_series).transpose().to_markdown()))})
+
+    return Output(input_series, metadata={'input_series': MetadataValue.md(recent_data.head().to_markdown())})
 
 ### API REQUEST ###
 
@@ -104,7 +124,7 @@ def create_request_payload(input_series):
     ins={"keycloak_token": AssetIn(key='keycloak_token'), 
          "deepTSF_payload": AssetIn(key='deepTSF_payload')},
     outs={"pred_series": AssetOut(dagster_type=pd.DataFrame)})
-def request_model_prediction(keycloak_token, deepTSF_payload):
+async def request_model_prediction(context, keycloak_token, deepTSF_payload):
     """Send the request to the model prediction endpoint and return the result."""
     headers = {
         'Content-Type': 'application/json',
@@ -116,9 +136,8 @@ def request_model_prediction(keycloak_token, deepTSF_payload):
         response.raise_for_status()
         print("Request successful.")
 
-        pred_series_json = pd.read_json(StringIO(response.text))
+        pred_series = pd.read_json(StringIO(response.text))
    
-        pred_series = pred_series_json.head()
         pred_series.plot(label='pred series')
         plt.title("Time series plot")
         buffer = BytesIO()
@@ -128,7 +147,11 @@ def request_model_prediction(keycloak_token, deepTSF_payload):
         pred_metadata = {}
         pred_metadata['pred_series'] = MetadataValue.md(str(pd.DataFrame(pred_series).transpose().to_markdown()))
         pred_metadata['time_series_plot'] = MetadataValue.md(f"![time_series_plot](data:image/png;base64,{image_data})")
-    
+
+        config = context.resources.config
+        schema, table_name = config.output_data_path.split('.')
+        await store_to_db(pred_series, table_name, schema)
+        
         return Output(pred_series, metadata=pred_metadata)
    
     except requests.exceptions.RequestException as e:
@@ -176,31 +199,3 @@ def deepTSF_pipeline():
 
     return {'keycloak_token': keycloak_token, "input_series": input_series, "pred_series": pred_series} 
     
-    # if pred_series is not None:
-    #     display_results(pred_series)
-
-# def run_deepTSF_prediction():
-#     """Execute the full pipeline for data preparation, authentication, and API request."""
-#     token = get_keycloak_token()
-#     if not token:
-#         print("Token acquisition failed. Exiting.")
-#         return
-#     else:
-#         print(f"Token Received: {token}")
-    
-#     # Prepare data
-#     series_data = prepare_series_data(CSV_FILE_PATH)
-#     future_covariates = None
-
-#     # Build the request payload
-#     payload = create_request_payload(series_data, future_covariates)
-    
-#     # Send request and process results
-#     result = request_model_prediction(token, payload)
-#     if result is not None:
-#         display_results(result)
-
-### EXECUTION ###
-
-# if __name__ == "__main__":
-#     run_deepTSF_prediction()
