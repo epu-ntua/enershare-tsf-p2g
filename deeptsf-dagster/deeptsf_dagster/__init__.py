@@ -1,7 +1,7 @@
 from dagster import Definitions
 from .config import DeepTSFConfig
 from .deeptsf_assets import deepTSF_pipeline
-from .schedules import deeptsf_dagster_schedule
+from .schedules import deeptsf_dagster_schedule, crete_schedule, wind_schedule, pv_schedule 
 from .jobs import deeptsf_dagster_job
 
 defs = Definitions(
@@ -10,5 +10,5 @@ defs = Definitions(
     resources={
         "config": DeepTSFConfig(),
     },
-    schedules=[deeptsf_dagster_schedule]
+    schedules=[deeptsf_dagster_schedule, crete_schedule, wind_schedule, pv_schedule],
 )
