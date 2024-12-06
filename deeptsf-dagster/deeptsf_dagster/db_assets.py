@@ -69,13 +69,13 @@ async def create_schema(schema_name):
 
 async def store_to_db(data, table_name, schema_name):
     try:
-        if table_exists_in_schema(table_name, schema_name):
-            data.to_sql(table_name, engine, schema=schema_name, if_exists='append', index=False)
-            print("Data has been successfully stored in the database at an existing table.")
-        else:
-            await create_schema(schema_name.lower()) # create schema if not exists - wait for schema to be created
-            data.to_sql(table_name, engine, schema=schema_name, if_exists='replace', index=False)
-            print("Data has been successfully stored in the database at a new table.")
+        # if table_exists_in_schema(table_name, schema_name):
+        #     data.to_sql(table_name, engine, schema=schema_name, if_exists='append', index=False)
+        #     print("Data has been successfully stored in the database at an existing table.")
+        # else:
+        await create_schema(schema_name.lower()) # create schema if not exists - wait for schema to be created
+        data.to_sql(table_name, engine, schema=schema_name, if_exists='replace', index=False)
+        print("Data has been successfully stored in the database at a new table.")
             
     except Exception as e:
             print("An error occurred while storing data in the database:", e)
