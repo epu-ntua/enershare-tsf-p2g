@@ -10,6 +10,7 @@ import json
 import os
 from urllib.parse import urlparse
 from .db_assets import get_table_as_df, store_to_db
+from datetime import datetime, timedelta
 
 # Define API configurations
 BASE_URL = "https://deeptsf-backend.toolbox.epu.ntua.gr"
@@ -23,6 +24,24 @@ def is_postgres_url(url):
 
 def is_filepath(s):
     return os.path.isabs(s) or os.path.isfile(s) or os.path.isdir(s)
+
+def end_of_input_period_for_dtsf(start_dt_of_projection):
+    #This function takes the timestamp of the starting hour of the requested forecast, which DeepTsF will need to make, as a string. For example:  '2025-12-29 05:00:00'
+    #Then it outputs the timestamp as a timestamp object, of when the input period (for DeepTSF) ends. Namely the previous hour of when the forecast starts, namely '2023-12-29 04:00:00'.
+    start_dt_of_projection_timestamp = datetime.strptime(start_dt_of_projection, '%Y-%m-%d %H:%M:%S')
+    projection_start_month, projection_start_day, projection_start_hour = start_dt_of_projection_timestamp.month, start_dt_of_projection_timestamp.day, start_dt_of_projection_timestamp.hour
+    previous_timestamp = start_dt_of_projection_timestamp - timedelta(hours=1) 
+    '''1. If projection period starts before (and including) 30/06/YYYY 23:00, use input period (7 days) for DeepTSF from 2024.
+       2. If projection period starts after 30/06/YYYY 23:00, use input period (7 days) for DeepTSF from 2023. 
+    '''
+    if projection_start_month <=6 and projection_start_day <=30 and projection_start_hour <= 23:
+        dagster_end_of_input_period_timestamp= previous_timestamp.replace(year =2024) #set year to 2024
+        #print(dagster_end_of_input_period_timestamp)
+        return dagster_end_of_input_period_timestamp
+    else:
+        dagster_end_of_input_period_timestamp= previous_timestamp.replace(year =2023) #set year to 2023
+        #print(dagster_end_of_input_period_timestamp)
+        return dagster_end_of_input_period_timestamp
 
 ### AUTHENTICATION ###
 
@@ -63,6 +82,8 @@ async def prepare_series_data(context):
 
     config = context.resources.config
 
+    forecast_start = config.forecast_start #datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
     df = pd.DataFrame()
 
     if(is_filepath(config.input_data_path)):
@@ -71,18 +92,27 @@ async def prepare_series_data(context):
     else:
         schema, table_name = config.input_data_path.split('.')
         df = await get_table_as_df(schema, table_name)
-    
+
+    input_end = end_of_input_period_for_dtsf(forecast_start)
+    input_end = input_end.strftime(f"{input_end.year}-{input_end.month:02d}-{input_end.day:02d} {input_end.hour:02d}:{input_end.minute:02d}:{input_end.second:02d}")
+    print(f"Input end: {input_end}")
+
+    recent_data = df[df['Datetime']<=input_end].tail(24*7) #take the exactly preceeding 7 days of data
+    print(recent_data.head(10))  # Display the first few rows
+    recent_data.set_index('Datetime', inplace=True)
+
     # df = pd.read_csv(config.input_data_path)
-    df.set_index('Datetime', inplace=True)
-    df.sort_index(inplace=True)
+    # df.set_index('Datetime', inplace=True)
+    # df.sort_index(inplace=True)
     
+    # TODO: Get the last timesteps ahead days from the current date
     # Get data for the specified hours
-    recent_data = df.tail(config.timesteps_ahead)
+    # recent_data = df.tail(27*7)
     
     # Format data as required by the API
     input_series = {"series": {"Value": recent_data['Value'].to_dict()}}
 
-    return Output(input_series, metadata={'input_series': MetadataValue.md(recent_data.head().to_markdown())})
+    return Output(input_series, metadata={'input_series': MetadataValue.md(str(pd.DataFrame(recent_data).transpose().to_markdown()))})
 
 ### API REQUEST ###
 
@@ -97,7 +127,7 @@ def create_request_payload(input_series):
     """Create the request payload with series and optional future covariates."""
     deepTSF_API_payload = {
         "run_id": "cf1b37db204c49f2b46a908cb98d6692",
-        "timesteps_ahead": 100,
+        "timesteps_ahead": 24*7,
         "series_uri": None,
         "multiple_file_type": False,
         "weather_covariates": False,
@@ -112,8 +142,11 @@ def create_request_payload(input_series):
         "format": "long",
         "series": input_series["series"],
     }
+     # Convert the payload into a markdown formatted string
+    formatted_payload = json.dumps(deepTSF_API_payload, indent=4)
+    markdown_preview = f"```json\n{formatted_payload}\n```"
 
-    return Output(deepTSF_API_payload, metadata={"request_payload": json.dumps(deepTSF_API_payload, indent=2)})
+    return Output(deepTSF_API_payload, metadata={"request_payload": MetadataValue.md(markdown_preview)})
 
 
 @multi_asset(
@@ -148,6 +181,10 @@ async def request_model_prediction(context, keycloak_token, deepTSF_payload):
         pred_metadata['pred_series'] = MetadataValue.md(str(pd.DataFrame(pred_series).transpose().to_markdown()))
         pred_metadata['time_series_plot'] = MetadataValue.md(f"![time_series_plot](data:image/png;base64,{image_data})")
 
+        context.log.info(f"Received data: {pred_series.head()}")
+        context.log.info(f"Received data type: {type(pred_series)}")
+        context.log.info(f"Received data shape: {pred_series.shape}")
+
         config = context.resources.config
         schema, table_name = config.output_data_path.split('.')
         await store_to_db(pred_series, table_name, schema)
@@ -156,10 +193,10 @@ async def request_model_prediction(context, keycloak_token, deepTSF_payload):
    
     except requests.exceptions.RequestException as e:
         print(f"Request failed: {e}")
-        return None
+        return e
     except ValueError as e:
         print(f"Failed to parse response JSON: {e}")
-        return None
+        return e
 
 ### RESULTS DISPLAY ###
 
@@ -178,6 +215,7 @@ def display_results(result_df):
     group_name='deepTSF_pipeline',
     outs={"keycloak_token": AssetOut(dagster_type=str),
             "input_series": AssetOut(dagster_type=dict),
+            'deepTSF_payload': AssetOut(dagster_type=dict),
             "pred_series": AssetOut(dagster_type=dict)})
 def deepTSF_pipeline():
     
@@ -197,5 +235,5 @@ def deepTSF_pipeline():
     # Send request and process results
     pred_series = request_model_prediction(keycloak_token, deepTSF_payload)
 
-    return {'keycloak_token': keycloak_token, "input_series": input_series, "pred_series": pred_series} 
+    return {'keycloak_token': keycloak_token, "input_series": input_series, 'deepTSF_payload': deepTSF_payload, "pred_series": pred_series} 
     

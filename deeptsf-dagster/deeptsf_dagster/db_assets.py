@@ -100,6 +100,8 @@ async def get_table_as_df(schema_name, table_name):
         result = session.query(table).all()
 
     # Convert the result to a DataFrame
-    df = pd.DataFrame(result)
+    # df = pd.DataFrame(result)
+    df = pd.DataFrame(result, columns=table.columns.keys())
+
     
     return df
