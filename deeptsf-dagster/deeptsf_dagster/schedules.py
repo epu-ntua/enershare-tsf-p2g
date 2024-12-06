@@ -47,7 +47,7 @@ def crete_schedule(context: ScheduleEvaluationContext):
         tags={"date": scheduled_date},
     )
 
-@schedule(job=deeptsf_dagster_job, cron_schedule="0 0 * * 2", execution_timezone='Europe/Athens')  # Tuesday at 00:00 GMT+3
+@schedule(job=deeptsf_dagster_job, cron_schedule="0 0 * * 1", execution_timezone='Europe/Athens')  # Tuesday at 00:00 GMT+3
 def wind_schedule(context: ScheduleEvaluationContext):
     scheduled_date = context.scheduled_execution_time.strftime('%Y-%m-%d %H:%M:%S')
 

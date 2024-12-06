@@ -1,0 +1,19 @@
+# Dockerfile.base
+FROM python:3.10.12-slim
+
+# Set the working directory in the container
+WORKDIR /dagster-dev/
+ENV DAGSTER_HOME=/dagster-dev
+
+# Install build-essential and other necessary system dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python libraries specified in requirements.txt
+COPY ./python_requirements.txt /dagster-dev/python_requirements.txt
+
+RUN pip install -r /dagster-dev/python_requirements.txt && \
+    rm -rf /var/cache/apk/* /tmp/*
