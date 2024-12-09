@@ -15,8 +15,6 @@ from datetime import datetime, timedelta
 # Define API configurations
 BASE_URL = "https://deeptsf-backend.toolbox.epu.ntua.gr"
 ENDPOINT = "/serving/get_result"
-CSV_FILE_PATH = "./wind.csv"
-
 
 def is_postgres_url(url):
     parsed_url = urlparse(url)
@@ -81,38 +79,42 @@ async def prepare_series_data(context):
     """Prepare time series data for the last 'hours' hours (default is 7 days)."""
 
     config = context.resources.config
+    input_data_paths = config.input_data_path.split(',')
 
-    forecast_start = config.forecast_start #datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    input_series = {}
+    metadata_df = pd.DataFrame()
 
-    df = pd.DataFrame()
+    for input_data_path in input_data_paths:
+        df = pd.DataFrame()
 
-    if(is_filepath(config.input_data_path)):
-        df = pd.read_csv(config.input_data_path) #,index_col=0
-    # elif(is_postgres_url(config.input_data_path)):
-    else:
-        schema, table_name = config.input_data_path.split('.')
-        df = await get_table_as_df(schema, table_name)
+        if is_filepath(input_data_path):
+            df = pd.read_csv(input_data_path)
+        else:
+            schema, table_name = input_data_path.split('.')
+            df = await get_table_as_df(schema, table_name)
 
-    input_end = end_of_input_period_for_dtsf(forecast_start)
-    input_end = input_end.strftime(f"{input_end.year}-{input_end.month:02d}-{input_end.day:02d} {input_end.hour:02d}:{input_end.minute:02d}:{input_end.second:02d}")
-    print(f"Input end: {input_end}")
 
-    recent_data = df[df['Datetime']<=input_end].tail(24*7) #take the exactly preceeding 7 days of data
-    print(recent_data.head(10))  # Display the first few rows
-    recent_data.set_index('Datetime', inplace=True)
+        input_end = end_of_input_period_for_dtsf(config.forecast_start)
+        input_end = input_end.strftime(f"{input_end.year}-{input_end.month:02d}-{input_end.day:02d} {input_end.hour:02d}:{input_end.minute:02d}:{input_end.second:02d}")
+        print(f"Input end: {input_end}")
 
-    # df = pd.read_csv(config.input_data_path)
-    # df.set_index('Datetime', inplace=True)
-    # df.sort_index(inplace=True)
-    
-    # TODO: Get the last timesteps ahead days from the current date
-    # Get data for the specified hours
-    # recent_data = df.tail(27*7)
-    
-    # Format data as required by the API
-    input_series = {"series": {"Value": recent_data['Value'].to_dict()}}
+        recent_data = df[df['Datetime']<=input_end].tail(24*7) #take the exactly preceeding 7 days of data
+        print(recent_data.head(10))  # Display the first few rows
+        recent_data.set_index('Datetime', inplace=True)
 
-    return Output(input_series, metadata={'input_series': MetadataValue.md(str(pd.DataFrame(recent_data).transpose().to_markdown()))})
+        # input_series = {"series": {"Value": recent_data['Value'].to_dict()}}
+        input_series[input_data_path] = {"series": {"Value": recent_data['Value'].to_dict()}}
+
+        # Add metadata for this input path
+        metadata_row = recent_data['Value'].to_frame().T
+        metadata_row['data_source'] = input_data_path
+        metadata_df = pd.concat([metadata_df, metadata_row], ignore_index=True)
+
+    # Reorder columns to have 'data_source' first
+    cols = ['data_source'] + [col for col in metadata_df.columns if col != 'data_source']
+    metadata_df = metadata_df[cols]
+
+    return Output(input_series, metadata={'input_series': MetadataValue.md(metadata_df.to_markdown())})
 
 ### API REQUEST ###
 
@@ -122,32 +124,42 @@ async def prepare_series_data(context):
     group_name='deepTSF_pipeline',
     required_resource_keys={"config"},
     ins={'input_series': AssetIn(key='input_series')},
-    outs={"deepTSF_API_payload": AssetOut(dagster_type=dict)})
+    outs={"deepTSF_payload": AssetOut(dagster_type=dict)})
 def create_request_payload(input_series):
     """Create the request payload with series and optional future covariates."""
-    deepTSF_API_payload = {
-        "run_id": "cf1b37db204c49f2b46a908cb98d6692",
-        "timesteps_ahead": 24*7,
-        "series_uri": None,
-        "multiple_file_type": False,
-        "weather_covariates": False,
-        "resolution": "1h",
-        "ts_id_pred": "1",
-        "past_covariates": None,
-        "past_covariates_uri": None,
-        "future_covariates": None,
-        "future_covariates_uri": None,
-        "roll_size": None,
-        "batch_size": None,
-        "format": "long",
-        "series": input_series["series"],
-    }
-     # Convert the payload into a markdown formatted string
-    formatted_payload = json.dumps(deepTSF_API_payload, indent=4)
-    markdown_preview = f"```json\n{formatted_payload}\n```"
+    deepTSF_API_payload = {}
+    run_id = None
 
-    return Output(deepTSF_API_payload, metadata={"request_payload": MetadataValue.md(markdown_preview)})
+    for input_path, series_data in input_series.items():
+        if 'crete' in input_path: run_id = 'f7c4d634ebfa4500815597652d9e848e'
+        elif 'wind' in input_path: run_id = '89aea0983dd64585b0fe87b53e6e8b02'
+        elif 'pv' in input_path: run_id = '38dfa336d6b845529ff2c8b11b64dc1b'
+        else: run_id = None
 
+        payload = {
+            "run_id": run_id,
+            "timesteps_ahead": 24*7,
+            "series_uri": None,
+            "multiple_file_type": False,
+            "weather_covariates": False,
+            "resolution": "1h",
+            "ts_id_pred": "",
+            "past_covariates": None,
+            "past_covariates_uri": None,
+            "future_covariates": None,
+            "future_covariates_uri": None,
+            "roll_size": None,
+            "batch_size": None,
+            "format": "long",
+            "series": series_data["series"],
+        }
+        table_name = input_path.split('.')[1]
+        deepTSF_API_payload[table_name] = payload
+
+    formatted_payloads = json.dumps(deepTSF_API_payload, indent=5)
+    markdown_preview = f"```json\n{formatted_payloads}\n```"
+
+    return Output(deepTSF_API_payload, metadata={"request_payloads": MetadataValue.md(markdown_preview)})
 
 @multi_asset(
     name="request_model_prediction",
@@ -164,39 +176,62 @@ async def request_model_prediction(context, keycloak_token, deepTSF_payload):
         'Authorization': f'Bearer {keycloak_token}'
     }
 
-    try:
-        response = requests.post(f"{BASE_URL}{ENDPOINT}", json=deepTSF_payload, headers=headers)
-        response.raise_for_status()
-        print("Request successful.")
+    pred_series_combined = pd.DataFrame()
+    metadata_df = pd.DataFrame()
+    pred_metadata = {}
 
-        pred_series = pd.read_json(StringIO(response.text))
-   
-        pred_series.plot(label='pred series')
-        plt.title("Time series plot")
-        buffer = BytesIO()
-        plt.savefig(buffer, format="png"); plt.close(); 
-        buffer.seek(0)  # Rewind buffer
-        image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        pred_metadata = {}
-        pred_metadata['pred_series'] = MetadataValue.md(str(pd.DataFrame(pred_series).transpose().to_markdown()))
-        pred_metadata['time_series_plot'] = MetadataValue.md(f"![time_series_plot](data:image/png;base64,{image_data})")
+    for index, (input_path, payload) in enumerate(deepTSF_payload.items()):
+        print(json.dumps(payload))
+        try:
+            response = requests.post(f"{BASE_URL}{ENDPOINT}", json=payload, headers=headers)
+            response.raise_for_status()
+            print(f"Request successful for {input_path}.")
 
-        context.log.info(f"Received data: {pred_series.head()}")
-        context.log.info(f"Received data type: {type(pred_series)}")
-        context.log.info(f"Received data shape: {pred_series.shape}")
+            pred_series = pd.read_json(StringIO(response.text))
+            pred_series['dataset_source'] = input_path  # Add column to signify dataset source
+            print(pred_series)  # Display the first few rows
 
-        config = context.resources.config
-        schema, table_name = config.output_data_path.split('.')
-        await store_to_db(pred_series, table_name, schema)
-        
-        return Output(pred_series, metadata=pred_metadata)
-   
-    except requests.exceptions.RequestException as e:
-        print(f"Request failed: {e}")
-        return e
-    except ValueError as e:
-        print(f"Failed to parse response JSON: {e}")
-        return e
+            pred_series_combined = pd.concat([pred_series_combined, pred_series], ignore_index=True)
+
+            # Add metadata for this input path
+            metadata_row = pred_series['Value'].to_frame().T
+            metadata_row['data_source'] = input_path
+            metadata_df = pd.concat([metadata_df, metadata_row], ignore_index=True)
+
+            pred_series.plot(label='pred series')
+            plt.title(f"{input_path}: Time series plot")
+            buffer = BytesIO()
+            plt.savefig(buffer, format="png"); plt.close(); 
+            buffer.seek(0)  # Rewind buffer
+            image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            # pred_metadata['pred_series'] = MetadataValue.md(str(pd.DataFrame(pred_series).transpose().to_markdown()))
+            pred_metadata[f'{input_path}_plot'] = MetadataValue.md(f"![time_series_plot](data:image/png;base64,{image_data})")
+
+            config = context.resources.config
+
+            
+            pred_series.reset_index(inplace=True)
+            pred_series.rename(columns={'index': 'Datetime'}, inplace=True)
+            # pred_series.set_index('Datetime', inplace=True)
+            print(pred_series.head())
+            current_output = config.output_data_path.split(',')[index]
+            schema, table_name = current_output.split('.')
+            await store_to_db(pred_series.drop(columns=['dataset_source']), table_name, schema)
+
+            # return Output(pred_series, metadata=pred_metadata, tags={"source": config.output_data_path})
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            return None
+        except ValueError as e:
+            print(f"Failed to parse response JSON: {e}")
+            return None
+
+    # Reorder columns to have 'data_source' first
+    cols = ['data_source'] + [col for col in metadata_df.columns if col != 'data_source']
+    metadata_df = metadata_df[cols]
+    pred_metadata['pred_series_df'] = MetadataValue.md(metadata_df.to_markdown())
+
+    return Output(pred_series_combined, metadata=pred_metadata)
 
 ### RESULTS DISPLAY ###
 
@@ -215,7 +250,7 @@ def display_results(result_df):
     group_name='deepTSF_pipeline',
     outs={"keycloak_token": AssetOut(dagster_type=str),
             "input_series": AssetOut(dagster_type=dict),
-            'deepTSF_payload': AssetOut(dagster_type=dict),
+            "deepTSF_payload": AssetOut(dagster_type=dict),
             "pred_series": AssetOut(dagster_type=dict)})
 def deepTSF_pipeline():
     
@@ -235,5 +270,5 @@ def deepTSF_pipeline():
     # Send request and process results
     pred_series = request_model_prediction(keycloak_token, deepTSF_payload)
 
-    return {'keycloak_token': keycloak_token, "input_series": input_series, 'deepTSF_payload': deepTSF_payload, "pred_series": pred_series} 
+    return {'keycloak_token': keycloak_token, "input_series": input_series, "pred_series": pred_series, "deepTSF_payload": deepTSF_payload} 
     
