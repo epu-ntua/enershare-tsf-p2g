@@ -23,23 +23,18 @@ def is_postgres_url(url):
 def is_filepath(s):
     return os.path.isabs(s) or os.path.isfile(s) or os.path.isdir(s)
 
+
 def end_of_input_period_for_dtsf(start_dt_of_projection):
     #This function takes the timestamp of the starting hour of the requested forecast, which DeepTsF will need to make, as a string. For example:  '2025-12-29 05:00:00'
     #Then it outputs the timestamp as a timestamp object, of when the input period (for DeepTSF) ends. Namely the previous hour of when the forecast starts, namely '2023-12-29 04:00:00'.
     start_dt_of_projection_timestamp = datetime.strptime(start_dt_of_projection, '%Y-%m-%d %H:%M:%S')
-    projection_start_month, projection_start_day, projection_start_hour = start_dt_of_projection_timestamp.month, start_dt_of_projection_timestamp.day, start_dt_of_projection_timestamp.hour
+    #projection_start_month, projection_start_day, projection_start_hour = start_dt_of_projection_timestamp.month, start_dt_of_projection_timestamp.day, start_dt_of_projection_timestamp.hour
     previous_timestamp = start_dt_of_projection_timestamp - timedelta(hours=1) 
-    '''1. If projection period starts before (and including) 30/06/YYYY 23:00, use input period (7 days) for DeepTSF from 2024.
-       2. If projection period starts after 30/06/YYYY 23:00, use input period (7 days) for DeepTSF from 2023. 
+    '''Output the exactly previous hour, only for year: 2023. For example, for forecast starting with '2026-10-28 12:00:00', output: '2023-10-28 11:00:00'
     '''
-    if projection_start_month <=6 and projection_start_day <=30 and projection_start_hour <= 23:
-        dagster_end_of_input_period_timestamp= previous_timestamp.replace(year =2024) #set year to 2024
-        #print(dagster_end_of_input_period_timestamp)
-        return dagster_end_of_input_period_timestamp
-    else:
-        dagster_end_of_input_period_timestamp= previous_timestamp.replace(year =2023) #set year to 2023
-        #print(dagster_end_of_input_period_timestamp)
-        return dagster_end_of_input_period_timestamp
+    dagster_end_of_input_period_timestamp= previous_timestamp.replace(year =2023) #set year to 2024
+    #print(dagster_end_of_input_period_timestamp)
+    return dagster_end_of_input_period_timestamp
 
 ### AUTHENTICATION ###
 
@@ -97,7 +92,7 @@ async def prepare_series_data(context):
         input_end = end_of_input_period_for_dtsf(config.forecast_start)
         input_end = input_end.strftime(f"{input_end.year}-{input_end.month:02d}-{input_end.day:02d} {input_end.hour:02d}:{input_end.minute:02d}:{input_end.second:02d}")
         print(f"Input end: {input_end}")
-
+    
         recent_data = df[df['Datetime']<=input_end].tail(24*7) #take the exactly preceeding 7 days of data
         print(recent_data.head(10))  # Display the first few rows
         recent_data.set_index('Datetime', inplace=True)
@@ -132,8 +127,8 @@ def create_request_payload(input_series):
 
     for input_path, series_data in input_series.items():
         if 'crete' in input_path: run_id = 'f7c4d634ebfa4500815597652d9e848e'
-        elif 'wind' in input_path: run_id = '89aea0983dd64585b0fe87b53e6e8b02'
-        elif 'pv' in input_path: run_id = '38dfa336d6b845529ff2c8b11b64dc1b'
+        elif 'wind' in input_path: run_id = '2596c1888c5b439ab52cbb5cc3a3269e'
+        elif 'pv' in input_path: run_id = '18f1fc6af4cd45c1a0f837e261372719'
         else: run_id = None
 
         payload = {
