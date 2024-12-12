@@ -184,6 +184,7 @@ async def request_model_prediction(context, keycloak_token, deepTSF_payload):
 
             pred_series = pd.read_json(StringIO(response.text))
             pred_series['dataset_source'] = input_path  # Add column to signify dataset source
+            pred_series['Value'] = pred_series['Value'].apply(lambda x: max(x, 0))
             print(pred_series)  # Display the first few rows
 
             pred_series_combined = pd.concat([pred_series_combined, pred_series], ignore_index=True)
