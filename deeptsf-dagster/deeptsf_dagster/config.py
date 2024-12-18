@@ -12,8 +12,8 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os
 class DeepTSFConfig(ConfigurableResource):
     # run_id: str = type_config['run_id']
     forecast_start: str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    input_data_path: str = "crete_fc_uc.crete_load_long,crete_fc_uc.wind_cf_long2,crete_fc_uc.pv_cf_long2" # f"{root_dir}/datasets/{os.environ.get('CSV_FILE_PATH')}"
-    output_data_path: str = 'crete_fc_uc.crete_load_projection,crete_fc_uc.wind_cf_projection2,crete_fc_uc.pv_cf_projection2'
+    input_data_path: str = "crete_fc_uc.crete_load_long,crete_fc_uc.wind_cf_long,crete_fc_uc.pv_cf_long" # f"{root_dir}/datasets/{os.environ.get('CSV_FILE_PATH')}"
+    output_data_path: str = 'crete_fc_uc.crete_load_projection,crete_fc_uc.wind_cf_projection,crete_fc_uc.pv_cf_projection'
     csv_future_covs: str = os.environ.get('CSV_FUTURE_COVS')
     
     def to_dict(self):
