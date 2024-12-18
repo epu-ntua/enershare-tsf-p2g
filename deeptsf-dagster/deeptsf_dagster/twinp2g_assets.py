@@ -44,7 +44,8 @@ async def call_twinP2G_API():
     buffer.seek(0)  # Rewind buffer
     twinp2g_output_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
     output_metadata[f'crete_use_case_output_series plot'] = MetadataValue.md(f"![time_series_plot](data:image/png;base64,{twinp2g_output_data})")
-
+    output_metadata['twinp2g_output'] = MetadataValue.md(twinp2g_output.to_markdown())
+    
     twinp2g_statistics = await get_table_as_df('crete_fc_uc', 'crete_use_case_statistics')
     print(twinp2g_statistics.head())
 
@@ -55,7 +56,8 @@ async def call_twinP2G_API():
     buffer.seek(0)  # Rewind buffer
     twinp2g_statistics_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
     output_metadata[f'crete_use_case_statistics_series plot'] = MetadataValue.md(f"![time_series_plot](data:image/png;base64,{twinp2g_statistics_data})")
-
+    output_metadata['twinp2g_statistics'] = MetadataValue.md(twinp2g_statistics.to_markdown())
+    
     return  Output(twinp2g_output, metadata=output_metadata)
 
 @graph_multi_asset(
